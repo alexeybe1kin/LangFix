@@ -157,6 +157,7 @@ int eng_add_hkl(HKL h) {
 void eng_init_layouts(void) {
   int i;
   g_nlay = 0;
+  eng_dict_reset();                    /* cached answers are keyed by group index */
   s_nlist = GetKeyboardLayoutList(32, s_list);
   for (i = 0; i < s_nlist; i++) eng_add_hkl(s_list[i]);
 }
@@ -373,48 +374,142 @@ static void evidence(int g, CAND* C, int n) {
   C->ev = e;
 }
 
+/* Recent dictionary answers. People repeat the same few hundred words all day, so most
+   lookups never reach the spellchecker thread. */
+#define DCACHE 512
+static struct { WCHAR w[MAXW]; BYTE g, n, typo; signed char res; } s_dc[DCACHE];
+
+static int dc_slot(const DICTQ* q) {
+  UINT h = 2166136261u ^ (UINT)(q->g * 2 + q->typo);
+  int i;
+  for (i = 0; i < q->n; i++) h = (h ^ q->w[i]) * 16777619u;
+  return (int)(h % DCACHE);
+}
+
+static int dc_get(DICTQ* q) {
+  int s = dc_slot(q), i;
+  if (s_dc[s].n != q->n || s_dc[s].g != q->g || s_dc[s].typo != q->typo) return 0;
+  for (i = 0; i < q->n; i++)
+    if (s_dc[s].w[i] != q->w[i]) return 0;
+  q->res = s_dc[s].res;
+  return 1;
+}
+
+static void dc_put(const DICTQ* q) {
+  int s = dc_slot(q), i;
+  for (i = 0; i < q->n; i++) s_dc[s].w[i] = q->w[i];
+  s_dc[s].n = (BYTE)q->n;
+  s_dc[s].g = (BYTE)q->g;
+  s_dc[s].typo = (BYTE)q->typo;
+  s_dc[s].res = (signed char)q->res;
+}
+
+void eng_dict_reset(void) {
+  int i;
+  for (i = 0; i < DCACHE; i++) s_dc[i].n = 0;
+}
+
+/* Answer q[0..nq), nq <= MAXL, from the cache, asking dict only for the rest.
+   0 if dict did not answer in time. */
+int eng_dict(DICTFN dict, DICTQ* q, int nq) {
+  DICTQ miss[MAXL];
+  int at[MAXL], nm = 0, i;
+  for (i = 0; i < nq; i++) {
+    q[i].res = -1;
+    if (!dc_get(&q[i])) { at[nm] = i; miss[nm++] = q[i]; }
+  }
+  if (!nm) return 1;
+  if (!dict(miss, nm)) return 0;
+  for (i = 0; i < nm; i++) {
+    q[at[i]].res = miss[i].res;
+    dc_put(&miss[i]);
+  }
+  return 1;
+}
+
+static int asks_dict(int g) {
+  const CAND* C = &g_cand[g];
+  return C->ok && C->scriptOk && C->c1 - C->c0 >= 2 && g_lay[g].nloc;
+}
+
 static int ask_dict(DICTFN dict) {
   DICTQ q[MAXL];
   int nq = 0, g, i;
   for (g = 0; g < g_nlay; g++) {
     CAND* C = &g_cand[g];
-    if (!C->ok || !C->scriptOk || C->c1 - C->c0 < 2 || !g_lay[g].nloc) continue;
+    if (!asks_dict(g)) continue;
     q[nq].g = g;
     q[nq].w = C->t + C->c0;
     q[nq].n = C->c1 - C->c0;
-    q[nq].res = -1;
     q[nq].typo = 0;
     nq++;
   }
   if (!nq) return 1;
-  if (!dict(q, nq)) return 0;
+  if (!eng_dict(dict, q, nq)) return 0;
   for (i = 0; i < nq; i++) g_cand[q[i].g].dict = q[i].res;
   return 1;
 }
 
-/* Score every layout's reading of the keys. Returns how much more the current
-   reading costs than the best acceptable other reading (1/8 bits), target in *target. */
-int eng_gain(const KEY* k, int n, int cur, DICTFN dict, int* target) {
-  CAND *c, *T;
-  int g, i, len, shortw, gain, best = -1, bestGain = -NOPE, second = -NOPE;
-
-  *target = -1;
-  if (n < 1 || n > MAXW || cur < 0 || cur >= g_nlay || !g_lay[cur].enabled) return -NOPE;
+/* Read the keys through every layout. 0 if the current reading must stay as it is. */
+static int prepare(const KEY* k, int n, int cur) {
+  CAND* c;
+  int g, i;
+  if (n < 1 || n > MAXW || cur < 0 || cur >= g_nlay || !g_lay[cur].enabled) return 0;
   for (g = 0; g < g_nlay; g++) analyze(g, k, n, &g_cand[g], g != cur);
   c = &g_cand[cur];
-  if (!c->ok) return -NOPE;
+  if (!c->ok) return 0;
   for (i = 0; i < n; i++)
-    if (c->t[i] >= L'0' && c->t[i] <= L'9') return -NOPE;   /* numbers, codes, passwords */
-  if (!ask_dict(dict)) return -NOPE;
-  for (g = 0; g < g_nlay; g++) evidence(g, &g_cand[g], n);
+    if (c->t[i] >= L'0' && c->t[i] <= L'9') return 0;   /* numbers, codes, passwords */
+  return 1;
+}
 
+/* Core length of layout g's reading if it may replace the current one at all, else 0. */
+static int target_len(int g, int cur) {
+  const CAND* T = &g_cand[g];
+  int len = T->c1 - T->c0;
+  if (g == cur || !g_lay[g].enabled || !T->ok || !T->scriptOk || !T->edgeOk || len < 2) return 0;
+  if (len == 2 && T->common != 5 && !is_short(g_lay[g].model, T->t + T->c0)) return 0;
+  return len;
+}
+
+/* Lowest (hi = 0) or highest (hi = 1) evidence cost over the dictionary's possible answers. */
+static int ev_bound(int g, int n, int hi) {
+  CAND* C = &g_cand[g];
+  int d, e = hi ? -NOPE : NOPE;
+  for (d = asks_dict(g) ? 1 : -1; d >= -1; d--) {
+    C->dict = d;
+    evidence(g, C, n);
+    if (hi ? C->ev > e : C->ev < e) e = C->ev;
+  }
+  C->dict = -1;
+  return e;
+}
+
+/* Could any answer from the dictionary give another reading a positive gain? A word
+   typed in the right layout reads as gibberish in the others whatever the dictionary
+   says, so most words skip the spellchecker. The skip changes nothing: no switch, and
+   the gain stays negative as main.c's context rule expects. */
+static int could_switch(int cur, int n) {
+  int g, len, worst = ev_bound(cur, n, 1);
+  for (g = 0; g < g_nlay; g++)
+    if ((len = target_len(g, cur)) != 0 &&
+        worst - ev_bound(g, n, 0) - (len == 2 ? g_par.minGainShort - g_par.minGain : 0) >= 0)
+      return 1;
+  return 0;
+}
+
+/* After the dictionary answered: how much more the current reading costs than the best
+   acceptable other reading (1/8 bits), target in *target. */
+static int choose(int cur, int n, int* target) {
+  CAND *c = &g_cand[cur], *T;
+  int g, len, shortw, gain, best = -1, bestGain = -NOPE, second = -NOPE;
+
+  *target = -1;
+  for (g = 0; g < g_nlay; g++) evidence(g, &g_cand[g], n);
   for (g = 0; g < g_nlay; g++) {
+    if (!(len = target_len(g, cur))) continue;
     T = &g_cand[g];
-    if (g == cur || !g_lay[g].enabled || !T->ok || !T->scriptOk || !T->edgeOk) continue;
-    len = T->c1 - T->c0;
-    if (len < 2) continue;
     shortw = len == 2;
-    if (shortw && T->common != 5 && !is_short(g_lay[g].model, T->t + T->c0)) continue;
     gain = c->ev - T->ev;
     if (T->dict == 1 || T->common) T->valid = 1;
     else if (T->dict == 0) T->valid = len >= 5 && T->ng >= 0 && T->ng <= NG_GOOD && gain >= g_par.minGain + g_par.misspelledGain;
@@ -430,6 +525,14 @@ int eng_gain(const KEY* k, int n, int cur, DICTFN dict, int* target) {
   return bestGain;
 }
 
+/* Score every layout's reading of the keys. Returns how much more the current
+   reading costs than the best acceptable other reading (1/8 bits), target in *target. */
+int eng_gain(const KEY* k, int n, int cur, DICTFN dict, int* target) {
+  *target = -1;
+  if (!prepare(k, n, cur) || !ask_dict(dict)) return -NOPE;
+  return choose(cur, n, target);
+}
+
 /* Returns the layout group the word was meant for (text in out), or -1.
    ctx: layout of the previous word in this text, -1 if unknown. */
 int eng_decide(const KEY* k, int n, int cur, int ctx, DICTFN dict, WCHAR* out) {
@@ -437,16 +540,16 @@ int eng_decide(const KEY* k, int n, int cur, int ctx, DICTFN dict, WCHAR* out) {
   CAND* c;
   DICTQ q;
   g_gain = -NOPE;
-  if (n < 2) return -1;
-  g_gain = gain = eng_gain(k, n, cur, dict, &t);
+  if (n < 2 || !prepare(k, n, cur) || !could_switch(cur, n) || !ask_dict(dict)) return -1;
+  g_gain = gain = choose(cur, n, &t);
   c = &g_cand[cur];
   len = c->c1 - c->c0;
   if (ctx == cur) need += g_par.ctxGain;
   if (c->dict == 1 || (c->common && (c->dict != 0 || c->common >= 4))) need += g_par.curValidGain;
   if (t < 0 || gain < need) return -1;
   if (c->dict == 0 && len >= 3 && gain < need + (len >= 5 ? g_par.typoGain : g_par.typoGainShort)) {
-    q.g = cur; q.w = c->t + c->c0; q.n = c->c1 - c->c0; q.res = -1; q.typo = 1;
-    if (!dict(&q, 1) || q.res != 0) return -1;     /* a typo of a real word, or no answer */
+    q.g = cur; q.w = c->t + c->c0; q.n = c->c1 - c->c0; q.typo = 1;
+    if (!eng_dict(dict, &q, 1) || q.res != 0) return -1;   /* a typo of a real word, or no answer */
   }
   for (i = 0; i <= n; i++) out[i] = g_cand[t].t[i];
   return t;

@@ -138,8 +138,8 @@ BEGIN
 END
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,2,0,0
- PRODUCTVERSION 1,2,0,0
+ FILEVERSION 1,3,0,0
+ PRODUCTVERSION 1,3,0,0
  FILEOS VOS_NT_WINDOWS32
  FILETYPE VFT_APP
 BEGIN
@@ -149,8 +149,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "LangFix - wrong keyboard layout fixer"
       VALUE "ProductName", "LangFix"
-      VALUE "FileVersion", "1.2.0"
-      VALUE "ProductVersion", "1.2.0"
+      VALUE "FileVersion", "1.3.0"
+      VALUE "ProductVersion", "1.3.0"
       VALUE "OriginalFilename", "LangFix.exe"
       VALUE "LegalCopyright", "Word lists: FrequencyWords (Hermit Dave), CC BY-SA 4.0"
     END

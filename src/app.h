@@ -10,7 +10,7 @@
 #include "resource.h"
 
 #define APP          L"LangFix"
-#define APP_VERSION  L"1.2.0"
+#define APP_VERSION  L"1.3.0"
 #define REPO_URL     L"https://github.com/alexeybe1kin/LangFix"
 #define REGKEY       L"Software\\LangFix"
 
@@ -24,6 +24,7 @@
 #define WM_AI_DONE   (WM_APP + 8)        /* lParam = AIREQ* */
 #define WM_JOB_END   (WM_APP + 9)        /* paste finished */
 #define WM_UPDATE    (WM_APP + 10)       /* lParam = heap string with the new version */
+#define WM_MOUSEHOOK (WM_APP + 11)       /* install or remove the mouse hook as needed */
 
 #define TIMER_MAIN   1
 #define TIMER_HINT   2

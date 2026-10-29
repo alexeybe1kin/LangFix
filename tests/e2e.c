@@ -41,8 +41,24 @@ static int ensure_front(void) {
   return GetForegroundWindow() == wnd && GetFocus() == edit;
 }
 
+static WCHAR stolenBy[64];   /* class of the window that took the focus mid-test */
+static PROCESS_INFORMATION lfp;
+
+/* Keys never go to another window: once the focus moves away from the test window
+   (or LangFix's own menu), nothing more is sent. */
+static int still_front(void) {
+  HWND fg = GetForegroundWindow();
+  DWORD pid = 0;
+  if (stolenBy[0]) return 0;
+  if (fg) GetWindowThreadProcessId(fg, &pid);
+  if (fg == wnd || (pid && pid == lfp.dwProcessId)) return 1;
+  if (!fg || !GetClassNameW(fg, stolenBy, 64)) wcscpy_s(stolenBy, 64, L"(none)");
+  return 0;
+}
+
 static void key(WORD vk, int up) {
   INPUT i = {0};
+  if (!up && !still_front()) return;
   i.type = INPUT_KEYBOARD;
   i.ki.wVk = vk;
   i.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
@@ -50,9 +66,30 @@ static void key(WORD vk, int up) {
   SendInput(1, &i, sizeof i);
 }
 
+/* A left click near the right end of the first line, which puts the caret at its end. */
+static void click_end(void) {
+  INPUT i[2] = {0};
+  HWND t = edit ? edit : wnd;
+  POINT pt, old;
+  RECT r;
+  GetCursorPos(&old);
+  GetClientRect(t, &r);
+  pt.x = r.right - 20;
+  pt.y = 12;
+  ClientToScreen(t, &pt);
+  SetCursorPos(pt.x, pt.y);
+  i[0].type = i[1].type = INPUT_MOUSE;
+  i[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+  i[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+  SendInput(2, i, sizeof(INPUT));
+  pump(60);
+  SetCursorPos(old.x, old.y);
+}
+
 /* Key spec: a-z letters, A-Z shift+letter, space, , . ; ' [ ] ` / digits,
    '<' Backspace, '|' Pause, '>' End, '~' Enter, '^' both Shift keys, '!' Shift+Pause,
-   Ctrl+Alt+ '#' Q, '@' P, '&' Enter, '%' Space. delay < 0 sends everything in one burst. */
+   Ctrl+Alt+ '#' Q, '@' P, '&' Enter, '%' Space, '*' mouse click at the end of the line.
+   delay < 0 sends everything in one burst. */
 static void press(const char* s, int delay) {
   static INPUT burst[512];
   int nb = 0;
@@ -92,6 +129,10 @@ static void press(const char* s, int delay) {
         pump(delay > 0 ? delay : 30);
         continue;
       case '~': vk = VK_RETURN; break;
+      case '*':
+        pump(delay > 0 ? delay : 30);
+        click_end();
+        continue;
     }
     if (!vk) continue;
     if (delay < 0) {
@@ -167,6 +208,7 @@ static void check(const char* name, HKL start, const char* keys, int delay, cons
     pump(60);
   }
   if (!ensure_front()) { fwprintf(out, L"ABORT: test window lost focus before %S\n", name); fails++; return; }
+  stolenBy[0] = 0;
   if (external) {
     ctrl_a_delete();
     pump(150);
@@ -189,6 +231,7 @@ static void check(const char* name, HKL start, const char* keys, int delay, cons
   if (!ok) fails++;
   fwprintf(out, L"%s  %-34S got \"%s\"  want \"%s\"  layout %04x%s\n", ok ? L"PASS" : L"FAIL", name, got, want,
            LOWORD((UINT_PTR)now), wantLayout ? L"" : L" (any)");
+  if (stolenBy[0]) fwprintf(out, L"      the focus moved to a \"%s\" window during this test\n", stolenBy);
 }
 
 /* Like check(), but the box starts with `init` all selected (0 = empty box) and the
@@ -203,6 +246,7 @@ static void check_sel(const char* name, HKL start, const WCHAR* init, const char
   ActivateKeyboardLayout(start, 0);
   pump(60);
   if (!ensure_front()) { fwprintf(out, L"ABORT: test window lost focus before %S\n", name); fails++; return; }
+  stolenBy[0] = 0;
   if (init) SendMessageW(edit, EM_SETSEL, 0, -1);
   else press(">", 20);
   press(keys, delay);
@@ -214,6 +258,7 @@ static void check_sel(const char* name, HKL start, const WCHAR* init, const char
   if (!ok) fails++;
   fwprintf(out, L"%s  %-34S got \"%s\"  want \"%s\"  layout %04x%s\n", ok ? L"PASS" : L"FAIL", name, got, want,
            LOWORD((UINT_PTR)now), wantLayout ? L"" : L" (any)");
+  if (stolenBy[0]) fwprintf(out, L"      the focus moved to a \"%s\" window during this test\n", stolenBy);
 }
 
 static void clip_put(const WCHAR* s) {
@@ -239,8 +284,6 @@ static void clip_check(const char* name, const WCHAR* want) {
   if (!ok) fails++;
   fwprintf(out, L"%s  %-34S got \"%s\"  want \"%s\"\n", ok ? L"PASS" : L"FAIL", name, got, want);
 }
-
-static PROCESS_INFORMATION lfp;
 
 static int lf_start(const WCHAR* exe) {
   STARTUPINFOW si = { sizeof si };
@@ -343,6 +386,8 @@ int wmain(int argc, wchar_t** argv) {
   check("Shift+Shift converts word", en, "nen^", 15, L"\x0442\x0443\x0442", ru);
   check("trailing comma stays English", en, "hello, ", 15, L"hello, ", en);
   check("trailing comma fixed to English", he, "hello, ", 15, L"hello, ", en);
+  check("a click ends the word; the next one is fixed", en, "ghbdtn* ghbdtn ", 15,
+        L"ghbdtn \x043F\x0440\x0438\x0432\x0435\x0442 ", ru);
 
   lf_stop();
 
@@ -376,7 +421,7 @@ int wmain(int argc, wchar_t** argv) {
     reg_msz(L"Apps", L"e2e.exe");
     SetEnvironmentVariableW(L"ANTHROPIC_API_KEY", L"test-key");
     if (!lf_start(argv[1])) { fwprintf(out, L"cannot restart LangFix\n"); return 2; }
-    check_sel("Shift+Pause converts a selection", en, L"ghbdtn rfr ltkf", "!", 30, 900,
+    check_sel("Shift+Pause converts a selection", en, L"ghbdtn rfr ltkf", "!", 30, 1500,
               L"\x043F\x0440\x0438\x0432\x0435\x0442 \x043A\x0430\x043A \x0434\x0435\x043B\x0430", ru);
     check("listed app: no automatic fix", en, "ghbdtn ", 15, L"ghbdtn ", en);
     clip_put(L"ORIGINAL CLIP");

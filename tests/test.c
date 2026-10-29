@@ -1,5 +1,5 @@
 /* Offline test for the detection engine.
-   lftest <out.txt> [-nodict] <lang>:<words.txt> ...
+   lftest <out.txt> [-nodict] [-ctx] <lang>:<words.txt> ... [-type <lang>:<text.txt>] ...
    Every word is "typed" (as key presses) in its own layout and then viewed through
    every installed layout:  own layout -> must stay,  other layout -> must switch back.
    Lines starting with '!' are words that must never be switched (names, typos, slang). */
@@ -78,9 +78,12 @@ static int near_word(ISpellChecker* sc, const WCHAR* w) {
   return found;
 }
 
+static long long dictCalls;   /* how often the engine had to ask the spellchecker */
+
 static int dict(DICTQ* q, int nq) {
   int i, j;
   WCHAR w[MAXW + 1];
+  dictCalls++;
   for (i = 0; i < nq; i++) {
     LAYOUT* L = &g_lay[q[i].g];
     q[i].res = -1;
@@ -131,6 +134,67 @@ static void dump(int cur) {
   }
 }
 
+/* -type <lang>:<text.txt>: running text word by word, as the app sees it on Space.
+   In its own layout (with the previous word as context) nothing may switch; in every
+   other layout each word must switch back. Prints the time per word and how often the
+   spellchecker was needed. */
+static void type_text(const wchar_t* arg) {
+  static const wchar_t* names[] = { L"en", L"ru", L"he" };
+  static WCHAR text[1 << 17];
+  WCHAR line[4096], w[MAXW + 1], o[MAXW + 1], *p;
+  KEY k[MAXW];
+  FILE* in;
+  LARGE_INTEGER f, t0, t1;
+  int model, src, cur, ctx, n, t, len, words, bad, used = 0;
+  long long calls0;
+  for (model = 0; model < 3; model++) if (!wcsncmp(arg, names[model], 2)) break;
+  if (model == 3 || (src = group_of_model(model)) < 0 || _wfopen_s(&in, arg + 3, L"r, ccs=UTF-8")) {
+    fwprintf(out, L"skip -type %s\n", arg);
+    return;
+  }
+  while (fgetws(line, 4096, in) && used + 4097 < (int)(sizeof text / sizeof text[0])) {
+    wcscpy_s(text + used, 4097, line);
+    used += (int)wcslen(line);
+  }
+  fclose(in);
+  fwprintf(out, L"\n=== -type %s\n", arg);
+  for (cur = 0; cur < g_nlay; cur++) {   /* load the dictionaries before timing, as the app does at start */
+    DICTQ q;
+    q.g = cur; q.w = L"a"; q.n = 1; q.typo = 0;
+    dict(&q, 1);
+  }
+  QueryPerformanceFrequency(&f);
+  for (cur = 0; cur < g_nlay; cur++) {
+    calls0 = dictCalls;
+    words = bad = 0;
+    ctx = -1;
+    QueryPerformanceCounter(&t0);
+    for (p = text; *p;) {
+      while (*p && iswspace(*p)) p++;
+      for (len = 0; p[len] && !iswspace(p[len]); len++) {}
+      if (!len) break;
+      if (len > MAXW) { p += len; ctx = -1; continue; }
+      wmemcpy(w, p, len); w[len] = 0;
+      p += len;
+      if ((n = to_keys(src, w, k)) < 2) { ctx = -1; continue; }
+      t = eng_decide(k, n, cur, cur == src ? ctx : -1, dict, o);
+      words++;
+      if (cur == src) {
+        if (t >= 0) { bad++; fwprintf(out, L"  FALSE-SWITCH %s -> %s\n", w, o); }
+        ctx = t >= 0 ? t : g_gain < 0 ? cur : -1;
+      } else if (t != src) {
+        bad++;
+        fwprintf(out, L"  MISSED %s typed in %d -> %d\n", w, cur, t);
+      }
+    }
+    QueryPerformanceCounter(&t1);
+    fwprintf(out, L"  typed in %d%s: %d words, %d %s, %.1f us per word, spellchecker asked for %.0f%% of words\n",
+             cur, cur == src ? L" (own layout)" : L"", words, bad, cur == src ? L"false switches" : L"missed",
+             (t1.QuadPart - t0.QuadPart) * 1e6 / f.QuadPart / (words ? words : 1),
+             100.0 * (double)(dictCalls - calls0) / (words ? words : 1));
+  }
+}
+
 /* gain records for the threshold sweep: kind 0 = must switch, 1 = must stay */
 static struct { int gain, right, kind, typo, curdict; WCHAR w[64]; } rec[20000];
 static int nrec;
@@ -163,6 +227,7 @@ int wmain(int argc, wchar_t** argv) {
     if (!wcscmp(argv[a], L"-nodict")) { nodict = 1; continue; }
     if (!wcscmp(argv[a], L"-fakeru")) { fakeru = 1; fake_load(L"..\\corpus\\ru.txt"); fake_load(L"ru_words.txt"); continue; }
     if (!wcscmp(argv[a], L"-ctx")) { usectx = 1; continue; }
+    if (!wcscmp(argv[a], L"-type") && a + 1 < argc) { type_text(argv[++a]); continue; }
     if (!wcscmp(argv[a], L"-p") && a + 1 < argc) {
       int* p = &g_par.db, i = 0; wchar_t* s = argv[++a];
       while (*s && i < (int)(sizeof g_par / sizeof(int))) { p[i++] = wcstol(s, &s, 10); if (*s == L',') s++; }

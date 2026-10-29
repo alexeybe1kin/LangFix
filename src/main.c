@@ -29,6 +29,7 @@ void* __cdecl memcpy(void* d, const void* s, size_t n) { __movsb((unsigned char*
 #define MAXQ       16
 #define MAXHELD    128
 #define CTX_MS     60000                /* the previous word counts as context this long */
+#define IDLE_MS    30000                /* a word left alone this long is forgotten (and the mouse hook removed) */
 
 enum { IDM_OPEN = 100, IDM_ENABLE, IDM_AUTOSTART, IDM_EXIT };
 
@@ -45,7 +46,7 @@ HICON icoOn, icoOff, icoBig;
 static HHOOK hkKb, hkMs;
 static UINT  wmTaskbarCreated;
 static NOTIFYICONDATAW nid;
-static DWORD lastHookTime, hookInstallTick;
+static DWORD lastHookTime, lastKeyTime, hookInstallTick;
 int   fixCount, undoCount, convCount, aiCount;
 WCHAR g_hint[256];
 
@@ -131,6 +132,7 @@ static DWORD WINAPI spell_thread(void* unused) {
   int res[MAXQ], mode[MAXQ], n, i;
   LONG seq;
   (void)unused;
+  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);   /* the hook thread waits for us */
   CoInitializeEx(0, COINIT_MULTITHREADED);
   CoCreateInstance(&CLSID_SCF_, 0, CLSCTX_INPROC_SERVER, &IID_SCF_, (void**)&fac);
   for (;;) {
@@ -549,9 +551,22 @@ static int  pendingAct;             /* custom convert hotkey waiting for its mod
 
 static const BYTE MODKEYS[] = { VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN };
 
+/* A click may move the caret, so it ends the word being tracked. Windows calls a
+   low-level mouse hook for every mouse movement too, which costs CPU time and makes
+   the whole system's mouse wait for us, so the hook is only installed while there is
+   a word a click could invalidate. */
+static int msWanted;
+
+static void mouse_watch(int on) {
+  if (on == msWanted) return;
+  msWanted = on;
+  PostMessageW(hWnd, WM_MOUSEHOOK, 0, 0);   /* (un)hooked outside the hook callbacks */
+}
+
 void reset_all(void) {
   ntok = tokBad = tokManual = 0;
   lastValid = 0;
+  mouse_watch(0);
 }
 
 int group_of_window(HWND wnd) {
@@ -854,6 +869,7 @@ static int handle(const KBDLLHOOKSTRUCT* k, int up) {
   if (!ntok) {
     tokShown = cur;
     tokBad = tokManual = 0;
+    mouse_watch(1);
   } else if (cur != tokShown) {
     tokBad = 1;                        /* layout changed inside the word */
   }
@@ -889,7 +905,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wp, LPARAM lp) {
   int up, r = 0;
   if (code != HC_ACTION) return CallNextHookEx(0, code, wp, lp);
   up = (k->flags & LLKHF_UP) != 0;
-  lastHookTime = k->time;
+  lastHookTime = lastKeyTime = k->time;
   DBG("in");
 
   if ((k->dwExtraInfo & TAG_MASK) == TAG_AI) {          /* our copy/paste for selected text */
@@ -927,11 +943,17 @@ static LRESULT CALLBACK MsProc(int code, WPARAM wp, LPARAM lp) {
   return CallNextHookEx(0, code, wp, lp);
 }
 
+static void mouse_sync(void) {
+  if (msWanted && !hkMs) hkMs = SetWindowsHookExW(WH_MOUSE_LL, MsProc, hInst, 0);
+  else if (!msWanted && hkMs) { UnhookWindowsHookEx(hkMs); hkMs = 0; }
+}
+
 static void hooks_install(void) {
   if (hkKb) UnhookWindowsHookEx(hkKb);
   if (hkMs) UnhookWindowsHookEx(hkMs);
   hkKb = SetWindowsHookExW(WH_KEYBOARD_LL, KbProc, hInst, 0);
-  hkMs = SetWindowsHookExW(WH_MOUSE_LL, MsProc, hInst, 0);
+  hkMs = 0;
+  mouse_sync();
   hookInstallTick = lastHookTime = GetTickCount();
 }
 
@@ -994,7 +1016,9 @@ static void show_menu(int x, int y) {
 }
 
 static void on_timer(void) {
+  static POINT lastPt;
   LASTINPUTINFO li;
+  POINT pt;
   if (eng_layouts_changed()) {
     eng_init_layouts();
     layouts_apply();
@@ -1004,11 +1028,16 @@ static void on_timer(void) {
     ui_langs_changed();
   }
   /* Windows silently drops hooks that ever time out; if input arrives that we never
-     saw, put them back (rate-limited, harmless when input went to an elevated window). */
+     saw, put them back (rate-limited, harmless when input went to an elevated window).
+     While the mouse hook is off, unseen input that moved the cursor was the mouse. */
   li.cbSize = sizeof li;
-  if (GetLastInputInfo(&li) && (int)(li.dwTime - lastHookTime) > 1000 &&
-      GetTickCount() - hookInstallTick > 30000)
-    hooks_install();
+  if (!GetCursorPos(&pt)) pt = lastPt;
+  if (GetLastInputInfo(&li) && (int)(li.dwTime - lastHookTime) > 1000) {
+    if (!hkMs && (pt.x != lastPt.x || pt.y != lastPt.y)) lastHookTime = li.dwTime;
+    else if (GetTickCount() - hookInstallTick > 30000) hooks_install();
+  }
+  lastPt = pt;
+  if (msWanted && GetTickCount() - lastKeyTime > IDLE_MS) reset_all();
   if (setUpdates) update_check(FALSE);
 }
 
@@ -1031,6 +1060,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return 0;
   case WM_STATS:
     ui_stats();
+    return 0;
+  case WM_MOUSEHOOK:
+    mouse_sync();
     return 0;
   case WM_HINT:
     hint_show(g_hint, 2400);
@@ -1090,7 +1122,7 @@ static int run(void) {
   InitializeCriticalSection(&cs);
   evReq = CreateEventW(0, FALSE, FALSE, 0);
   evResp = CreateEventW(0, FALSE, FALSE, 0);
-  CloseHandle(CreateThread(0, 256 * 1024, spell_thread, 0, 0, 0));
+  CloseHandle(CreateThread(0, 0, spell_thread, 0, 0, 0));
   spell_warm();
 
   /* the exe may have moved since autostart / the shortcut were made */

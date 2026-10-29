@@ -68,6 +68,9 @@ extern int   g_nuser;
 typedef struct { int g; const WCHAR* w; int n; int res; int typo; } DICTQ;
 /* Fill q[i].res for every query; return 0 if the dictionary did not answer in time. */
 typedef int (*DICTFN)(DICTQ* q, int nq);
+/* The same through the engine's cache of recent answers (nq <= MAXL). */
+int  eng_dict(DICTFN dict, DICTQ* q, int nq);
+void eng_dict_reset(void);
 
 extern LAYOUT g_lay[MAXL];
 extern int    g_nlay;
