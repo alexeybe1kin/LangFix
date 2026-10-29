@@ -297,7 +297,7 @@ Tests:
   `-type en:corpus\en.txt` types running text word by word and reports the time per word and
   how often the spellchecker was needed.
 - `build\e2e.exe dist\LangFix.exe out.txt` types real keystrokes with LangFix running. It covers
-  33 cases, including every setting and the AI flow. Start `python tests\mock_claude.py 8765 requests.jsonl`
+  34 cases, including every setting, mouse clicks and the AI flow. Start `python tests\mock_claude.py 8765 requests.jsonl`
   first for the AI cases. Add `--edge <msedge.exe> <temp dir>` to type into an Edge window instead.
 
 ## Credits
