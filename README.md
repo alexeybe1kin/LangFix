@@ -94,7 +94,7 @@ wrong layouts:
 ```mermaid
 flowchart LR
     KB([Keyboard]) --> HOOK
-    subgraph LangFix.exe
+    subgraph LF ["LangFix.exe"]
         HOOK["Keyboard hook<br/>main.c"] -- "keys of the word" --> ENG["Engine<br/>engine.c"]
         ENG -. "only when it could matter" .-> SPELL["Spellchecker thread<br/>Windows ISpellChecker"]
         ENG -- "the word belongs to another layout" --> FIX["Retype<br/>SendInput"]
