@@ -1,0 +1,15 @@
+# build output (dist\LangFix.exe is attached to GitHub releases instead)
+build/
+dist/
+*.obj
+*.res
+*.pdb
+*.ilk
+
+# generated from data/freq and corpus by tools/build_model.py
+src/model.h
+
+# local test leftovers
+*.log
+*.jsonl
+__pycache__/

@@ -1,0 +1,162 @@
+#pragma code_page(65001)
+#include <winres.h>
+#include <commctrl.h>
+#include "../src/resource.h"
+
+IDI_ON  ICON "on.ico"
+IDI_OFF ICON "off.ico"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
+
+IDD_MAIN DIALOGEX 0, 0, 300, 292
+STYLE DS_SETFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "LangFix"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    CONTROL         "", IDC_TAB, "SysTabControl32", WS_TABSTOP, 6, 6, 288, 258
+    LTEXT           "Changes are saved right away.", IDC_STATUS, 8, 274, 222, 10
+    PUSHBUTTON      "Close", IDCANCEL, 238, 270, 56, 15
+END
+
+IDD_GENERAL DIALOGEX 0, 0, 276, 236
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    AUTOCHECKBOX    "&Fix words typed in the wrong keyboard layout", IDC_ENABLED, 8, 8, 262, 11
+    AUTOCHECKBOX    "Start LangFix automatically when &Windows starts", IDC_AUTOSTART, 8, 22, 262, 11
+    AUTOCHECKBOX    "Show LangFix in the Start &menu", IDC_STARTMENU, 8, 36, 262, 11
+    AUTOCHECKBOX    "Show a small &hint near the cursor when a word is fixed", IDC_HINTS, 8, 50, 262, 11
+    AUTOCHECKBOX    "Also check the last word when I press E&nter", IDC_ENTER, 8, 64, 262, 11
+    AUTOCHECKBOX    "Check for &updates (once a day, on GitHub)", IDC_UPDATES, 8, 78, 262, 11
+    GROUPBOX        "How eager to fix", IDC_STATIC, 8, 96, 262, 58
+    AUTORADIOBUTTON "&Careful — only words that are clearly wrong", IDC_SENS0, 16, 109, 248, 11, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "&Balanced (recommended)", IDC_SENS1, 16, 123, 248, 11
+    AUTORADIOBUTTON "&Eager — catches more, may rarely change a word it shouldn't", IDC_SENS2, 16, 137, 248, 11
+    LTEXT           "A word is checked when you press Space. Tab never changes anything, and words with digits are always left alone.", IDC_STATIC, 8, 162, 262, 20
+    LTEXT           "", IDC_STATS, 8, 186, 262, 18
+    CONTROL         "LangFix 1.2 · <a href=""https://github.com/alexeybe1kin/LangFix"">github.com/alexeybe1kin/LangFix</a> · word lists: <a href=""https://github.com/hermitdave/FrequencyWords"">FrequencyWords</a> (CC BY-SA 4.0)", IDC_ABOUT, "SysLink", WS_TABSTOP, 8, 212, 262, 18
+END
+
+IDD_HOTKEYS DIALOGEX 0, 0, 276, 236
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    GROUPBOX        "Convert or undo a word", IDC_STATIC, 8, 4, 262, 92
+    LTEXT           "Converts the word you are typing, or the one you just finished. Right after an automatic fix it undoes the fix and LangFix leaves that word alone from then on.", IDC_STATIC, 16, 15, 248, 26
+    AUTOCHECKBOX    "&Pause / Break key", IDC_HK_PAUSE, 16, 43, 248, 11
+    AUTOCHECKBOX    "Both &Shift keys together", IDC_HK_SHIFTS, 16, 57, 248, 11
+    LTEXT           "Your own &key:", IDC_STATIC, 16, 77, 62, 10
+    CONTROL         "", IDC_HK_CONVERT, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 80, 75, 128, 13
+    PUSHBUTTON      "Clear", IDC_HK_CONVERT_CLR, 214, 74, 50, 15
+    GROUPBOX        "Convert selected text", IDC_STATIC, 8, 100, 262, 60
+    LTEXT           "Select a whole sentence typed in the wrong layout and convert all of it at once.", IDC_STATIC, 16, 111, 248, 10
+    AUTOCHECKBOX    "Shift + P&ause", IDC_HK_SELPAUSE, 16, 124, 248, 11
+    LTEXT           "Own k&ey:", IDC_STATIC, 16, 142, 62, 10
+    CONTROL         "", IDC_HK_SEL, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 80, 140, 128, 13
+    PUSHBUTTON      "Clear", IDC_HK_SEL_CLR, 214, 139, 50, 15
+    GROUPBOX        "Turn LangFix on and off", IDC_STATIC, 8, 164, 262, 34
+    LTEXT           "S&hortcut:", IDC_STATIC, 16, 180, 62, 10
+    CONTROL         "", IDC_HK_TOGGLE, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 80, 178, 128, 13
+    PUSHBUTTON      "Clear", IDC_HK_TOGGLE_CLR, 214, 177, 50, 15
+    LTEXT           "Click a box and press the keys you want, for example Ctrl+Alt+Space. Single keys work for F1–F24, Pause and Scroll Lock.", IDC_STATIC, 8, 206, 262, 20
+END
+
+IDD_LANGS DIALOGEX 0, 0, 276, 236
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "LangFix switches only between the checked keyboard layouts. Uncheck one to make LangFix leave it alone.", IDC_STATIC, 8, 8, 262, 18
+    CONTROL         "", IDC_LANGLIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 8, 30, 262, 132
+    LTEXT           "A Windows spellchecker makes detection more accurate. Windows adds one when you install a language together with its typing features.", IDC_STATIC, 8, 170, 262, 20
+    PUSHBUTTON      "Windows &language settings…", IDC_LANGSETTINGS, 8, 196, 120, 15
+END
+
+IDD_WORDS DIALOGEX 0, 0, 276, 236
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "My words — slang, names, work terms. Typed right they stay; typed in the wrong layout they get fixed.", IDC_STATIC, 8, 6, 126, 34
+    LISTBOX         IDC_MYLIST, 8, 42, 126, 124, LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+    EDITTEXT        IDC_MYEDIT, 8, 170, 82, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "&Add", IDC_MYADD, 93, 169, 41, 15
+    PUSHBUTTON      "&Remove", IDC_MYDEL, 8, 187, 50, 15
+    LTEXT           "Never change — left exactly as typed. Undoing a fix with the hotkey adds the word here.", IDC_STATIC, 144, 6, 126, 34
+    LISTBOX         IDC_IGNLIST, 144, 42, 126, 124, LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+    EDITTEXT        IDC_IGNEDIT, 144, 170, 82, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "A&dd", IDC_IGNADD, 229, 169, 41, 15
+    PUSHBUTTON      "R&emove", IDC_IGNDEL, 144, 187, 50, 15
+    AUTOCHECKBOX    "Recognize common chat &slang: lol, brb, ахах, норм, יאללה", IDC_SLANG, 8, 212, 262, 11
+END
+
+IDD_AI DIALOGEX 0, 0, 276, 236
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    AUTOCHECKBOX    "&Use AI writing tools (Claude by Anthropic)", IDC_AI_ON, 8, 6, 262, 11
+    LTEXT           "Select text and press a hotkey: Claude fixes spelling and grammar (wrong-layout words too), rewrites, or translates it right where it is. Only the text you select is sent, and only when you press the hotkey.", IDC_STATIC, 8, 20, 262, 28
+    LTEXT           "API &key:", IDC_STATIC, 8, 55, 48, 10
+    EDITTEXT        IDC_AI_KEY, 58, 53, 150, 13, ES_PASSWORD | ES_AUTOHSCROLL
+    PUSHBUTTON      "&Save key", IDC_AI_SAVEKEY, 214, 52, 56, 15
+    CONTROL         "No key yet? <a href=""https://console.anthropic.com/settings/keys"">Create one in the Anthropic Console</a>. It is stored encrypted.", IDC_AI_KEYLINK, "SysLink", WS_TABSTOP, 58, 69, 212, 18
+    LTEXT           "&Model:", IDC_STATIC, 8, 92, 48, 10
+    COMBOBOX        IDC_AI_MODEL, 58, 90, 212, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "AI &menu:", IDC_STATIC, 8, 112, 48, 10
+    CONTROL         "", IDC_AI_MENUHK, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 58, 110, 150, 13
+    PUSHBUTTON      "Clear", IDC_AI_MENUHK_CLR, 214, 109, 56, 15
+    LTEXT           "&Fix writing:", IDC_STATIC, 8, 130, 48, 10
+    CONTROL         "", IDC_AI_FIXHK, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 58, 128, 150, 13
+    PUSHBUTTON      "Clear", IDC_AI_FIXHK_CLR, 214, 127, 56, 15
+    LTEXT           "The menu offers: fix, improve, shorten, more formal, more friendly, translate, convert layout, or ask Claude anything. With nothing selected, the line before the cursor is used. Ctrl+Z undoes the change; Esc cancels while Claude works.", IDC_STATIC, 8, 148, 262, 36
+    PUSHBUTTON      "&Test connection", IDC_AI_TEST, 8, 190, 76, 15
+    LTEXT           "", IDC_AI_RESULT, 90, 193, 180, 20
+END
+
+IDD_APPS DIALOGEX 0, 0, 276, 236
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "LangFix won't fix words automatically in these apps. Its hotkeys and AI tools still work there.", IDC_STATIC, 8, 6, 262, 18
+    LISTBOX         IDC_APPLIST, 8, 26, 262, 130, LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+    LTEXT           "&App:", IDC_STATIC, 8, 164, 28, 10
+    COMBOBOX        IDC_APPCOMBO, 38, 162, 170, 120, CBS_DROPDOWN | CBS_SORT | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "A&dd", IDC_APPADD, 214, 161, 56, 15
+    PUSHBUTTON      "&Remove", IDC_APPDEL, 8, 180, 56, 15
+    LTEXT           "Pick a running app or type its .exe name. Games, remote desktops and terminals are good candidates.", IDC_STATIC, 8, 204, 262, 20
+END
+
+IDD_ASK DIALOGEX 0, 0, 262, 92
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_TOPMOST
+CAPTION "Ask Claude"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "What should Claude do with the selected text?", IDC_STATIC, 8, 8, 246, 10
+    EDITTEXT        IDC_ASK_EDIT, 8, 22, 246, 14, ES_AUTOHSCROLL
+    LTEXT           "For example: turn it into a polite email · answer the question · add a few emojis", IDC_STATIC, 8, 42, 246, 18
+    DEFPUSHBUTTON   "OK", IDOK, 148, 70, 50, 15
+    PUSHBUTTON      "Cancel", IDCANCEL, 204, 70, 50, 15
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,2,0,0
+ PRODUCTVERSION 1,2,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "FileDescription", "LangFix - wrong keyboard layout fixer"
+      VALUE "ProductName", "LangFix"
+      VALUE "FileVersion", "1.2.0"
+      VALUE "ProductVersion", "1.2.0"
+      VALUE "OriginalFilename", "LangFix.exe"
+      VALUE "LegalCopyright", "Word lists: FrequencyWords (Hermit Dave), CC BY-SA 4.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
